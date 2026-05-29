@@ -1,0 +1,54 @@
+### LlamaFactory SFT config v2: bigger batch, more GPUs, denser eval
+### Usage: llamafactory-cli train sft/train_qwen3vl_compressed_v2.yaml
+
+### Model
+model_name_or_path: Qwen/Qwen3-VL-4B-Instruct
+template: qwen3_vl
+enable_thinking: false
+
+### Data
+dataset_dir: /mnt/data/sft_data/compressed_3x
+dataset: compressed_qa_train
+eval_dataset: compressed_qa_eval
+
+### Training method
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_rank: 32
+lora_alpha: 32
+lora_target: all
+
+### Training hyperparameters
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 4
+learning_rate: 1.0e-5
+num_train_epochs: 1
+lr_scheduler_type: cosine
+warmup_ratio: 0.05
+max_grad_norm: 1.0
+bf16: true
+
+### Evaluation (token-level accuracy via ComputeAccuracy)
+per_device_eval_batch_size: 4
+eval_strategy: steps
+eval_steps: 50
+eval_on_start: true
+batch_eval_metrics: true
+compute_accuracy: true
+
+### Logging & saving
+logging_steps: 10
+save_steps: 100
+save_total_limit: 5
+output_dir: /mnt/data/sft_output/qwen3vl_compressed_3x_v2
+
+### System
+preprocessing_num_workers: 8
+dataloader_num_workers: 4
+cutoff_len: 2048
+report_to: wandb
+run_name: sft_qwen3vl_compressed_3x_v2
+
+### DeepSpeed (6 GPU)
+deepspeed: examples/deepspeed/ds_z2_config.json

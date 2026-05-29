@@ -1,0 +1,47 @@
+### SFT-3x LLM+ViT v3: push closer to 2x ceiling (0.948)
+### v2 (r=256, 1ep, lr 1e-5): 0.894. Try r=512 + 2ep to squeeze more.
+
+model_name_or_path: Qwen/Qwen3-VL-4B-Instruct
+template: qwen3_vl
+enable_thinking: false
+
+dataset_dir: /scratch/users/zwcolin/cxr_embeds/sft_data/compressed_3x
+dataset: compressed_qa_train
+eval_dataset: compressed_qa_eval
+
+stage: sft
+do_train: true
+finetuning_type: lora
+freeze_vision_tower: false
+lora_rank: 512
+lora_alpha: 512
+lora_target: all
+
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 4
+learning_rate: 1.0e-5
+num_train_epochs: 2
+lr_scheduler_type: cosine
+warmup_ratio: 0.05
+max_grad_norm: 1.0
+bf16: true
+
+per_device_eval_batch_size: 2
+eval_strategy: steps
+eval_steps: 400
+eval_on_start: false
+batch_eval_metrics: true
+compute_accuracy: true
+
+logging_steps: 20
+save_steps: 400
+save_total_limit: 6
+output_dir: /scratch/users/zwcolin/cxr_embeds/sft_output/qwen3vl_3x_llmvit_v3
+
+preprocessing_num_workers: 16
+dataloader_num_workers: 8
+cutoff_len: 2048
+report_to: wandb
+run_name: sft_qwen3vl_3x_llmvit_v3_r512_2ep
+
+deepspeed: examples/deepspeed/ds_z2_config.json

@@ -1,0 +1,15 @@
+source:
+  type: kiwix
+  zim_path: wikipedia-simple   # alias → auto-downloads Simple English Wikipedia (~1GB)
+  # Or use a file path: zim_path: ~/pixelrag-data/zim/wikipedia_en_simple.zim
+  # Or a URL: zim_path: https://download.kiwix.org/zim/wikipedia/...
+
+ingest:
+  backend: cdp
+  quality: 85
+
+embed:
+  model: Qwen/Qwen3-VL-Embedding-2B
+  device: cpu
+
+output: demos/e2e/output

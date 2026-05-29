@@ -1,0 +1,8 @@
+{
+  "name": "pixelbrowse",
+  "version": "0.1.0",
+  "description": "Give Claude eyes \u2014 screenshot any URL with pixelshot and read it visually",
+  "author": {
+    "name": "Zhifei Li"
+  }
+}

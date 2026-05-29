@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-lint:
+    name: Python lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Lint with ruff
+        run: uvx ruff check .
+
+      - name: Check formatting with ruff
+        run: uvx ruff format --check .
+
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install (core + dev)
+        run: uv sync --extra dev
+
+      - name: Chrome runtime libraries
+        run: npx -y playwright install-deps chromium
+
+      - name: Cache patched Chrome
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pixelrag/chrome
+          key: pixelrag-chrome-150.0.7844.0
+
+      - name: Download patched Chrome (cached after first run)
+        run: uv run pixelshot install-chrome
+
+      - name: Run tests
+        run: uv run pytest tests/ -v
+
+  plugin-validate:
+    name: Plugin validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate marketplace + plugin
+        run: |
+          claude plugin validate .
+          claude plugin validate ./plugin

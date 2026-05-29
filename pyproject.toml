@@ -1,0 +1,123 @@
+[project]
+name = "pixelrag"
+version = "0.2.1"
+description = "Visual Retrieval-Augmented Generation — render, embed, index, search"
+requires-python = ">=3.12"
+authors = [{ name = "Zhifei Li", email = "andylizf@outlook.com" }]
+license = "Apache-2.0"
+readme = "README.md"
+keywords = ["rag", "retrieval", "vision-language", "screenshots", "embeddings", "faiss"]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# Core stays light — rendering / screenshots only (no torch). The `pixelshot` command and
+# the `pixelrag` umbrella work on this alone. Heavy ML stages are opt-in extras below.
+dependencies = [
+    "pillow>=10.0.0",
+    "websockets>=12.0",
+    "pymupdf>=1.27.2.3",
+    "pyturbojpeg>=2.2.0",
+    "cef-capi-py>=131.3.5",
+    "anthropic>=0.102.0",
+]
+
+[project.optional-dependencies]
+embed = [
+    "torch>=2.9.0",
+    "torchvision>=0.24.0",
+    "transformers>=4.57.0",
+    "faiss-cpu>=1.9.0",
+    "numpy>=1.26.0",
+    "tqdm>=4.60.0",
+]
+serve = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "numpy>=1.26.0",
+    "faiss-cpu>=1.9.0",
+    "transformers>=4.57.0",
+    "torch>=2.9.0",
+    "qwen-vl-utils",
+    "pydantic>=2.0.0",
+]
+index = ["pixelrag[embed]", "pyyaml>=6.0"]
+all = ["pixelrag[embed,serve,index]"]
+gpu = ["faiss-gpu-cu12>=1.13.2"]
+playwright = ["playwright>=1.40.0"]
+pdf = ["pdf2image>=1.16.0"]
+kiwix = ["libzim>=3.6.0"]
+distributed = ["boto3>=1.42.0"]
+eval = [
+    "pandas>=2.0",
+    "Pillow>=10.0",
+    "tqdm>=4.60",
+    "trafilatura>=1.6",
+    "openai>=1.0",
+    "aiohttp>=3.9",
+    "datasets>=2.14",
+    "huggingface-hub>=0.20",
+]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+pixelshot = "pixelrag_render.render:main"
+pixelrag = "pixelrag.cli:main"
+
+[project.urls]
+Homepage = "https://pixelrag.ai"
+Repository = "https://github.com/StarTrail-org/PixelRAG"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# One distribution bundles the umbrella + every stage module.
+packages = [
+    "src/pixelrag",
+    "render/src/pixelrag_render",
+    "embed/src/pixelrag_embed",
+    "index/src/pixelrag_index",
+    "serve/src/pixelrag_serve",
+]
+
+[tool.hatch.build.targets.sdist]
+# Repo root holds multi-GB data dirs (.venv, tiles, arxiv, …); ship only the package sources.
+include = [
+    "/src/pixelrag",
+    "/render/src",
+    "/embed/src",
+    "/index/src",
+    "/serve/src",
+    "/README.md",
+    "/LICENSE",
+]
+
+[tool.uv]
+override-dependencies = ["nvidia-cudnn-cu12==9.20.0.48"]
+environments = ["sys_platform == 'linux'"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu129" }]
+torchvision = [{ index = "pytorch-cu129" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[tool.ruff]
+exclude = ["tmp"]
+
+[tool.ruff.lint]
+ignore = [
+    "E402",  # module-level import not at top — common in ML codebases
+    "E741",  # ambiguous variable name (l, O, I)
+]
+
+[tool.pyright]
+extraPaths = ["render/src", "embed/src", "index/src", "serve/src", "train/src"]
+venvPath = "."
+venv = ".venv"

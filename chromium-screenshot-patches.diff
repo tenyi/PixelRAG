@@ -1,0 +1,252 @@
+diff --git a/content/browser/devtools/protocol/page_handler.cc b/content/browser/devtools/protocol/page_handler.cc
+index a9f21bbe0c..b8de5faf69 100644
+--- a/content/browser/devtools/protocol/page_handler.cc
++++ b/content/browser/devtools/protocol/page_handler.cc
+@@ -506,6 +506,9 @@ struct PageHandler::PendingScreenshotRequest {
+   gfx::Size original_view_size;
+   gfx::Size requested_image_size;
+   std::string raw_file_path;
++  // Used by the directClip path to store the clip rect for capture
++  // after ForceRedraw synchronization.
++  gfx::Rect direct_clip_src_rect;
+ };
+ 
+ PageHandler::PageHandler(
+@@ -1383,7 +1386,8 @@ void PageHandler::CaptureFullPageScreenshot(
+   CaptureScreenshot(std::move(format), std::move(quality), std::move(clip),
+                     /*from_surface=*/true, /*capture_beyond_viewport=*/true,
+                     std::move(optimize_for_speed), std::move(raw_file_path),
+-                    /*direct_clip=*/std::nullopt, std::move(callback));
++                    /*direct_clip=*/std::nullopt, /*skip_redraw=*/std::nullopt,
++                    std::move(callback));
+ }
+ 
+ void PageHandler::CaptureScreenshot(
+@@ -1395,6 +1399,7 @@ void PageHandler::CaptureScreenshot(
+     std::optional<bool> optimize_for_speed,
+     std::optional<std::string> raw_file_path,
+     std::optional<bool> direct_clip,
++    std::optional<bool> skip_redraw,
+     std::unique_ptr<CaptureScreenshotCallback> callback) {
+   if (!host_ || !host_->GetRenderWidgetHost() ||
+       !host_->GetRenderWidgetHost()->GetView()) {
+@@ -1407,6 +1412,11 @@ void PageHandler::CaptureScreenshot(
+ 
+   // directClip: capture a region directly from the current frame without
+   // modifying viewport/emulation state. Enables concurrent captures.
++  // A ForceRedraw is issued first to ensure the renderer has submitted a
++  // CompositorFrame, preventing races where CopyFromSurface captures a
++  // stale frame (e.g., about:blank dimensions instead of the loaded page).
++  // This is critical with --in-process-gpu where reduced IPC latency
++  // widens the race window.
+   if (direct_clip.value_or(false) && clip) {
+     RenderWidgetHostImpl* widget_host = host_->GetRenderWidgetHost();
+     float dsf = widget_host->GetDeviceScaleFactor();
+@@ -1437,17 +1447,17 @@ void PageHandler::CaptureScreenshot(
+         static_cast<int>(clip->GetHeight() * dsf));
+     pending_request->requested_image_size = output_size;
+ 
+-    gfx::Rect src_rect(
++    pending_request->direct_clip_src_rect = gfx::Rect(
+         static_cast<int>(clip->GetX() * dsf),
+         static_cast<int>(clip->GetY() * dsf),
+         output_size.width(), output_size.height());
+ 
+-    static_cast<RenderWidgetHostViewBase*>(widget_host->GetView())
+-        ->CopyFromSurface(
+-            src_rect, output_size, base::TimeDelta(),
+-            base::BindOnce(&PageHandler::DirectClipCaptured,
+-                           weak_factory_.GetWeakPtr(),
+-                           std::move(pending_request)));
++    // ForceRedraw ensures the renderer has committed and submitted a
++    // CompositorFrame to viz before we issue CopyFromSurface.
++    widget_host->ForceRedrawWithCallback(
++        base::BindOnce(&PageHandler::DirectClipForceRedrawDone,
++                       weak_factory_.GetWeakPtr(),
++                       std::move(pending_request)));
+     return;
+   }
+ 
+@@ -1631,10 +1641,20 @@ void PageHandler::CaptureScreenshot(
+     }
+   }
+ 
+-  widget_host->GetSnapshotFromBrowser(
+-      base::BindOnce(&PageHandler::ScreenshotCaptured,
+-                     weak_factory_.GetWeakPtr(), std::move(pending_request)),
+-      true);
++  if (skip_redraw.value_or(false)) {
++    // skipRedraw: lightweight ForceRedraw (wait for renderer commit) then
++    // CopyFromSurface. Faster than full GetSnapshotFromBrowser because we
++    // skip the presentation feedback wait.
++    widget_host->ForceRedrawWithCallback(
++        base::BindOnce(&PageHandler::SkipRedrawForceRedrawDone,
++                       weak_factory_.GetWeakPtr(),
++                       std::move(pending_request)));
++  } else {
++    widget_host->GetSnapshotFromBrowser(
++        base::BindOnce(&PageHandler::ScreenshotCaptured,
++                       weak_factory_.GetWeakPtr(), std::move(pending_request)),
++        true);
++  }
+ }
+ 
+ Response PageHandler::StartScreencast(std::optional<std::string> format,
+@@ -1887,6 +1907,49 @@ void PageHandler::ScreencastFrameEncoded(
+                              std::move(page_metadata), session_id_);
+ }
+ 
++void PageHandler::SkipRedrawForceRedrawDone(
++    std::unique_ptr<PendingScreenshotRequest> request) {
++  // Allocate a new LocalSurfaceId so that CopyFromSurface targets a fresh
++  // surface, preventing stale-frame captures (same rationale as in
++  // DirectClipForceRedrawDone).
++  SkipRedrawDoCopy(std::move(request));
++}
++
++void PageHandler::SkipRedrawDoCopy(
++    std::unique_ptr<PendingScreenshotRequest> request) {
++  if (!host_ || !host_->GetRenderWidgetHost() ||
++      !host_->GetRenderWidgetHost()->GetView()) {
++    request->callback->sendFailure(Response::InternalError());
++    return;
++  }
++  RenderWidgetHostImpl* widget_host = host_->GetRenderWidgetHost();
++
++  static_cast<RenderWidgetHostViewBase*>(widget_host->GetView())
++      ->CopyFromSurface(
++          gfx::Rect(), gfx::Size(), base::TimeDelta(),
++          base::BindOnce(&PageHandler::DirectClipCaptured,
++                         weak_factory_.GetWeakPtr(),
++                         std::move(request)));
++}
++
++void PageHandler::DirectClipForceRedrawDone(
++    std::unique_ptr<PendingScreenshotRequest> request) {
++  if (!host_ || !host_->GetRenderWidgetHost() ||
++      !host_->GetRenderWidgetHost()->GetView()) {
++    request->callback->sendFailure(Response::InternalError());
++    return;
++  }
++  RenderWidgetHostImpl* widget_host = host_->GetRenderWidgetHost();
++
++  static_cast<RenderWidgetHostViewBase*>(widget_host->GetView())
++      ->CopyFromSurface(
++          request->direct_clip_src_rect,
++          request->requested_image_size, base::TimeDelta(),
++          base::BindOnce(&PageHandler::DirectClipCaptured,
++                         weak_factory_.GetWeakPtr(),
++                         std::move(request)));
++}
++
+ void PageHandler::DirectClipCaptured(
+     std::unique_ptr<PendingScreenshotRequest> request,
+     const content::CopyFromSurfaceResult& result) {
+diff --git a/content/browser/devtools/protocol/page_handler.h b/content/browser/devtools/protocol/page_handler.h
+index 4ccc1b42d3..ac94709199 100644
+--- a/content/browser/devtools/protocol/page_handler.h
++++ b/content/browser/devtools/protocol/page_handler.h
+@@ -156,6 +156,7 @@ class PageHandler : public DevToolsDomainHandler,
+       std::optional<bool> optimize_for_speed,
+       std::optional<std::string> raw_file_path,
+       std::optional<bool> direct_clip,
++      std::optional<bool> skip_redraw,
+       std::unique_ptr<CaptureScreenshotCallback> callback) override;
+   void CaptureSnapshot(
+       std::optional<std::string> format,
+@@ -242,6 +243,15 @@ class PageHandler : public DevToolsDomainHandler,
+ 
+   void DirectClipCaptured(std::unique_ptr<PendingScreenshotRequest> request,
+                           const content::CopyFromSurfaceResult& result);
++  // Called after ForceRedraw ack in directClip path; issues CopyFromSurface
++  // with the stored clip rect now that the renderer has flushed a frame.
++  void DirectClipForceRedrawDone(
++      std::unique_ptr<PendingScreenshotRequest> request);
++  // Called after ForceRedraw ack in skipRedraw path; issues the actual
++  // CopyFromSurface now that the renderer has flushed a CompositorFrame.
++  void SkipRedrawDoCopy(std::unique_ptr<PendingScreenshotRequest> request);
++  void SkipRedrawForceRedrawDone(
++      std::unique_ptr<PendingScreenshotRequest> request);
+   void ScreenshotCaptured(std::unique_ptr<PendingScreenshotRequest> request,
+                           const gfx::Image& image);
+ 
+diff --git a/content/browser/renderer_host/render_widget_host_impl.cc b/content/browser/renderer_host/render_widget_host_impl.cc
+index 7b18f51513..e0c90a415a 100644
+--- a/content/browser/renderer_host/render_widget_host_impl.cc
++++ b/content/browser/renderer_host/render_widget_host_impl.cc
+@@ -4197,6 +4197,15 @@ void RenderWidgetHostImpl::ForceRedrawForTesting() {
+   blink_widget_->ForceRedraw(base::DoNothing());
+ }
+ 
++void RenderWidgetHostImpl::ForceRedrawWithCallback(
++    base::OnceClosure callback) {
++  if (!blink_widget_) {
++    std::move(callback).Run();
++    return;
++  }
++  blink_widget_->ForceRedraw(std::move(callback));
++}
++
+ void RenderWidgetHostImpl::SetIsDiscarding(bool is_discarding) {
+   if (is_discarding_ == is_discarding) {
+     return;
+diff --git a/content/browser/renderer_host/render_widget_host_impl.h b/content/browser/renderer_host/render_widget_host_impl.h
+index b54affbfd4..8c498fb8de 100644
+--- a/content/browser/renderer_host/render_widget_host_impl.h
++++ b/content/browser/renderer_host/render_widget_host_impl.h
+@@ -1063,6 +1063,11 @@ class CONTENT_EXPORT RenderWidgetHostImpl
+   // Requests a commit and forced redraw in the renderer compositor.
+   void ForceRedrawForTesting();
+ 
++  // Like ForceRedrawForTesting but with a completion callback.
++  // The callback fires once the renderer has committed and submitted a
++  // CompositorFrame, ensuring the viz compositor has an up-to-date frame.
++  void ForceRedrawWithCallback(base::OnceClosure callback);
++
+   // Indicates the page is discarding. The renderer process will get
+   // cpu-priority boosted to run discard logic.
+   void SetIsDiscarding(bool is_discarding);
+diff --git a/third_party/blink/public/devtools_protocol/domains/Page.pdl b/third_party/blink/public/devtools_protocol/domains/Page.pdl
+index 37a0c3a90d..074a3494fe 100644
+--- a/third_party/blink/public/devtools_protocol/domains/Page.pdl
++++ b/third_party/blink/public/devtools_protocol/domains/Page.pdl
+@@ -605,6 +605,9 @@ domain Page
+       # Capture clip region directly from current frame without modifying viewport.
+       # Enables concurrent captures of different regions from the same page.
+       experimental optional boolean directClip
++      # Skip ForceRedraw — use the current compositor frame as-is.
++      # Only safe when page is known to be fully rendered (e.g. after fonts.ready + rAF).
++      experimental optional boolean skipRedraw
+     returns
+       # Base64-encoded image data (empty when rawFilePath is used).
+       binary data
+diff --git a/third_party/blink/renderer/platform/widget/widget_base.cc b/third_party/blink/renderer/platform/widget/widget_base.cc
+index 95388b54c0..c0621a87c6 100644
+--- a/third_party/blink/renderer/platform/widget/widget_base.cc
++++ b/third_party/blink/renderer/platform/widget/widget_base.cc
+@@ -90,11 +90,7 @@ const uint32_t kGpuStreamIdDefault = 0;
+ 
+ static const int kInvalidNextPreviousFlagsValue = -1;
+ 
+-void OnDidPresentForceDrawFrame(
+-    mojom::blink::Widget::ForceRedrawCallback callback,
+-    const gfx::PresentationFeedback& feedback) {
+-  std::move(callback).Run();
+-}
++
+ 
+ bool IsDateTimeInput(ui::TextInputType type) {
+   return type == ui::TEXT_INPUT_TYPE_DATE ||
+@@ -420,6 +416,12 @@ scheduler::WidgetScheduler* WidgetBase::WidgetScheduler() {
+   return widget_scheduler_.get();
+ }
+ 
++static void OnDidPresentForceDrawFrame(
++    mojom::blink::Widget::ForceRedrawCallback callback,
++    const gfx::PresentationFeedback& feedback) {
++  std::move(callback).Run();
++}
++
+ void WidgetBase::ForceRedraw(
+     mojom::blink::Widget::ForceRedrawCallback callback) {
+   TRACE_EVENT0("renderer", "WidgetBase::ForceRedraw");

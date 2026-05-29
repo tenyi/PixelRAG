@@ -1,0 +1,56 @@
+__pycache__/
+*.py[cod]
+checkpoints/
+data/
+output*/
+*.log
+wandb/
+
+# Large/generated artifacts
+*.pt
+*.zip
+*.png
+!docs/img/*.png
+blog_review_first100/
+blog_review_first100_light/
+analysis/
+tmp_*.json
+hf_dataset_export/
+hf_dataset_export_sharded/
+
+# One-off data prep/upload scripts (data already on HF)
+prepare_andy_datasets.py
+upload_andy_datasets.py
+package_andy_shards.py
+
+# Training outputs / checkpoint symlinks
+training/output*
+training/eval_results
+
+# Embedding caches (large, regenerable)
+tmp/*.pkl
+
+# Local scratch / historical artifacts (eval JSONLs land in --output-dir)
+tmp/
+eval_output/
+
+# Serving venvs
+serving/vllm/.venv/
+.env
+
+# Eval tiles / local caches
+test_miniv6/
+test_miniv7/
+test_miniv8/
+
+# HF upload staging (already on Hub)
+hf_upload_*/
+
+# Claude Code local state
+.claude/
+
+# SFT: LlamaFactory fork venv + outputs (11 GB)
+sft/LlamaFactory/
+
+# Keep eval JSONs (useful eval artifacts), skip tqdm log noise
+sft/eval_out/*.log

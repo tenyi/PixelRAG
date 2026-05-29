@@ -1,0 +1,50 @@
+### Top-6 retrieval SFT @ 2x compression, v4 (mixed + 2x top3 oversample)
+### v3 (1:1 mixed, r=256) = 0.946/0.950/0.954/0.936 — current 2x best.
+### 3x_v5 (2:1 top3:vark mixed) lifted 3x avg LLM-judge by +0.031 vs 1:1 — does it
+### generalize to 2x? Hypothesis: yes; the only k where 2x_v3 still trails base@0x
+### is k=1 (0.946 vs 0.958), and heavier k=3 weighting might also improve k=1.
+model_name_or_path: Qwen/Qwen3-VL-4B-Instruct
+template: qwen3_vl
+enable_thinking: false
+
+dataset_dir: /scratch/users/zwcolin/cxr_embeds/sft_data/compressed_top6_2x
+dataset: multimage_top3_train,multimage_top3_train_dup,multimage_vark_train
+eval_dataset: multimage_vark_eval
+
+stage: sft
+do_train: true
+finetuning_type: lora
+freeze_vision_tower: false
+lora_rank: 256
+lora_alpha: 256
+lora_target: all
+
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 4
+learning_rate: 1.0e-5
+num_train_epochs: 2
+lr_scheduler_type: cosine
+warmup_ratio: 0.03
+max_grad_norm: 1.0
+bf16: true
+
+per_device_eval_batch_size: 1
+eval_strategy: steps
+eval_steps: 1600
+eval_on_start: false
+batch_eval_metrics: true
+compute_accuracy: true
+
+logging_steps: 30
+save_steps: 1600
+save_total_limit: 8
+output_dir: /scratch/users/zwcolin/cxr_embeds/sft_output/qwen3vl_top6_2x_v4
+
+preprocessing_num_workers: 8
+dataloader_num_workers: 4
+cutoff_len: 10240
+report_to: wandb
+run_name: sft_qwen3vl_top6_2x_v4_mixed2x_top3_r256_2ep
+
+deepspeed: examples/deepspeed/ds_z2_config.json
+ddp_timeout: 180000000

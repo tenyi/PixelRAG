@@ -1,0 +1,45 @@
+name: Release to PyPI
+
+# Publishes the `pixelrag` package to PyPI. Auth is an account-scoped API token stored as
+# the `PYPI_API_TOKEN` repo secret (see RELEASING.md). Triggered by publishing a GitHub
+# Release (tag like `v0.2.0`), or run manually:
+#   - dry_run = true  → build only (no upload)
+#   - dry_run = false → build + publish
+# `--check-url` makes publishing idempotent: files already on PyPI are skipped.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build only, do not publish"
+        type: boolean
+        default: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: pixelrag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+
+      - name: Build
+        run: uv build --out-dir dist
+
+      - name: List artifacts
+        run: ls -l dist
+
+      - name: Publish to PyPI
+        if: ${{ github.event_name == 'release' || !inputs.dry_run }}
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: uv publish --check-url https://pypi.org/simple/
