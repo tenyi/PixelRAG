@@ -72,8 +72,57 @@ export function AboutSection() {
         ))}
       </div>
 
+      {/* Paper & Authors */}
+      <div className="mt-16 mx-auto max-w-2xl text-center">
+        <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-primary/70">
+          Research
+        </p>
+        <a
+          href="https://github.com/StarTrail-org/PixelRAG/blob/main/assets/pixelrag-paper.pdf"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-3 inline-block font-display text-xl font-light leading-tight tracking-tight text-foreground transition-colors hover:text-primary sm:text-2xl"
+        >
+          Web Screenshots Beat Text for
+          <br className="hidden sm:inline" />
+          {" "}Retrieval-Augmented Generation
+        </a>
+        <div className="mt-5 text-[14px] leading-relaxed text-muted-foreground">
+          <p>
+            <a href="https://yichuan-w.github.io/" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-primary">Yichuan Wang</a>
+            <span className="text-primary/50 text-[11px]">*</span>
+            <span className="text-muted-foreground/30">{" · "}</span>
+            <a href="https://zhifei.li/" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-primary">Zhifei Li</a>
+            <span className="text-primary/50 text-[11px]">*</span>
+            <span className="text-muted-foreground/30">{" · "}</span>
+            <a href="https://zwcolin.github.io/" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-primary">Zirui Wang</a>
+            <span className="text-muted-foreground/30">{" · "}</span>
+            <a href="https://www.linkedin.com/in/paul-teiletche/" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-primary">Paul Teiletche</a>
+            <span className="text-muted-foreground/30">{" · "}</span>
+            <a href="https://www.linkedin.com/in/lesheng-jin-9618b0201/" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-primary">Lesheng Jin</a>
+          </p>
+          <p className="mt-1.5">
+            <a href="https://people.eecs.berkeley.edu/~matei/" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-primary">Matei Zaharia</a>
+            <span className="text-primary/50 text-[11px]">†</span>
+            <span className="text-muted-foreground/30">{" · "}</span>
+            <a href="https://people.eecs.berkeley.edu/~jegonzal/" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-primary">Joseph E. Gonzalez</a>
+            <span className="text-primary/50 text-[11px]">†</span>
+            <span className="text-muted-foreground/30">{" · "}</span>
+            <a href="https://www.sewonmin.com/" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-primary">Sewon Min</a>
+            <span className="text-primary/50 text-[11px]">†</span>
+          </p>
+        </div>
+        <div className="mt-6 flex justify-center">
+          <img
+            src="/berkeley-logo.png"
+            alt="UC Berkeley"
+            className="h-12 grayscale sepia opacity-60 transition-opacity hover:opacity-80"
+          />
+        </div>
+      </div>
+
       {/* Footer note */}
-      <p className="mt-12 text-center text-[13px] text-muted-foreground">
+      <p className="mt-10 text-center text-[13px] text-muted-foreground">
         Open source on{" "}
         <a
           href="https://github.com/StarTrail-org/PixelRAG"
