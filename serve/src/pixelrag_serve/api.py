@@ -180,6 +180,7 @@ class Hit(BaseModel):
     # guessing coordinates past its end.
     article_pages: str | None = None
     image_base64: str | None = None
+    text: str | None = None  # 對齊純文字欄位
 
 
 class QueryResult(BaseModel):
@@ -424,7 +425,7 @@ async def search(req: SearchRequest):
     elif req.min_tile_height:
         fetch_k = req.n_docs * 5
     else:
-        fetch_k = req.n_docs
+        fetch_k = req.n_docs * 3  # RRF 需要更多候選
     distances, indices = index.search(query_vectors, fetch_k)
 
     if req.nprobe is not None:
@@ -439,51 +440,116 @@ async def search(req: SearchRequest):
     y_offsets = meta["y_offsets"]
     tile_heights = meta["tile_heights"]
     tiles_dir = _state.get("tiles_dir", "")
+    text_retriever = _state.get("text_retriever")
 
+    RRF_K = 60
     results = []
     for qi in range(len(req.queries)):
-        hits = []
-        for j in range(fetch_k):
+        # 視覺路候選收集
+        visual_candidates = []
+        seen_keys = set()
+        actual_fetch_k = min(fetch_k, indices.shape[1])
+        for j in range(actual_fetch_k):
             vid = int(indices[qi, j])
             if vid == -1:
                 continue
-            th = int(tile_heights[vid])
-            if req.min_tile_height and th < req.min_tile_height:
-                continue
             aid = int(article_ids[vid])
+            ti = int(tile_indices[vid])
+            ci = int(chunk_indices[vid])
+            key = (aid, ti, ci)
+            if key not in seen_keys:
+                seen_keys.add(key)
+                visual_candidates.append({
+                    "article_id": aid,
+                    "tile_index": ti,
+                    "chunk_index": ci,
+                    "y_offset": int(y_offsets[vid]),
+                    "tile_height": int(tile_heights[vid]),
+                    "vector_id": vid,
+                    "score": float(distances[qi, j])
+                })
+
+        # 文字路候選收集
+        text_candidates = []
+        if text_retriever and req.queries[qi].text:
+            text_candidates = text_retriever.search(req.queries[qi].text, fetch_k)
+
+        # RRF 得分計算
+        rrf_scores = {}
+        for rank, cand in enumerate(visual_candidates, 1):
+            key = (cand["article_id"], cand["tile_index"], cand["chunk_index"])
+            rrf_scores[key] = rrf_scores.get(key, 0.0) + (1.0 / (RRF_K + rank))
+
+        for rank, cand in enumerate(text_candidates, 1):
+            key = (cand["article_id"], cand["tile_index"], cand["chunk_index"])
+            rrf_scores[key] = rrf_scores.get(key, 0.0) + (1.0 / (RRF_K + rank))
+
+        # 排序
+        sorted_keys = sorted(rrf_scores.keys(), key=lambda k: rrf_scores[k], reverse=True)
+
+        hits = []
+        for aid, ti, ci in sorted_keys:
+            key = (aid, ti, ci)
+            
+            # 從文字檢索器的記憶體中獲取對齊屬性
+            meta_info = None
+            if text_retriever and hasattr(text_retriever, "coordinate_to_meta"):
+                meta_info = text_retriever.coordinate_to_meta.get(key)
+
+            if meta_info:
+                y_offset = meta_info["y_offset"]
+                tile_height = meta_info["tile_height"]
+                text_content = meta_info["text"]
+            else:
+                y_offset = 0
+                tile_height = 0
+                text_content = ""
+                for vc in visual_candidates:
+                    if vc["article_id"] == aid and vc["tile_index"] == ti and vc["chunk_index"] == ci:
+                        y_offset = vc["y_offset"]
+                        tile_height = vc["tile_height"]
+                        break
+
+            if req.min_tile_height and tile_height < req.min_tile_height:
+                continue
             url = _resolve_url(aid)
             if req.articles_only and _is_meta(url):
                 continue
-            ti = int(tile_indices[vid])
-            ci = int(chunk_indices[vid])
+
             tile_path = _resolve_path(aid, ti, ci)
             img_b64 = None
             if req.include_images and tile_path and os.path.exists(tile_path):
                 with open(tile_path, "rb") as fp:
                     img_b64 = base64.b64encode(fp.read()).decode()
             elif req.include_images and _state.get("ondemand") is not None:
-                img_b64 = _ondemand_chunk_b64(aid, ti, ci, th)
-            # Expose a relative tile path, not the absolute server filesystem
-            # path (avoids leaking the host's directory layout; clients fetch
-            # tiles via /tile/{article_id}/{tile_index}/{chunk_index}).
+                img_b64 = _ondemand_chunk_b64(aid, ti, ci, tile_height)
+
             rel_path = tile_path
             if tiles_dir:
                 candidate = os.path.relpath(tile_path, tiles_dir)
                 if not candidate.startswith(".."):
                     rel_path = candidate
+
+            vid = -1
+            for vc in visual_candidates:
+                if vc["article_id"] == aid and vc["tile_index"] == ti and vc["chunk_index"] == ci:
+                    vid = vc["vector_id"]
+                    break
+
             hits.append(
                 Hit(
-                    score=float(distances[qi, j]),
+                    score=float(rrf_scores[key]),
                     vector_id=vid,
                     article_id=aid,
                     tile_index=ti,
                     chunk_index=ci,
-                    y_offset=int(y_offsets[vid]),
-                    tile_height=th,
+                    y_offset=y_offset,
+                    tile_height=tile_height,
                     path=rel_path,
                     url=url,
                     article_pages=_article_pages(aid),
                     image_base64=img_b64,
+                    text=text_content
                 )
             )
             if len(hits) >= req.n_docs:
@@ -491,7 +557,7 @@ async def search(req: SearchRequest):
         results.append(QueryResult(hits=hits))
 
     logger.info(
-        "Search: %d queries, n_docs=%d, encode=%.3fs, search=%.3fs, total=%.3fs",
+        "RRF 混合搜尋: %d 個 queries, n_docs=%d, encode=%.3fs, search=%.3fs, total=%.3fs",
         len(req.queries),
         req.n_docs,
         t_encode,
@@ -629,6 +695,11 @@ def load(args):
     index_mtime = os.path.getmtime(index_path)
     index_built_at = datetime.fromtimestamp(index_mtime, tz=timezone.utc).isoformat()
 
+    # 初始化文字檢索器並索引
+    from .text_retriever import BM25TextRetriever
+    text_retriever = BM25TextRetriever()
+    text_retriever.index(args.tiles_dir)
+
     _state.update(
         {
             "index": index,
@@ -646,6 +717,7 @@ def load(args):
             "index_size_bytes": index_size,
             "metadata_size_bytes": meta_size,
             "ondemand": None,
+            "text_retriever": text_retriever,
         }
     )
 
