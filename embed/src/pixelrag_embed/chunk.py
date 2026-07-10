@@ -49,6 +49,27 @@ CHUNK_HEIGHT = 1024
 MIN_CHUNK_HEIGHT = 28  # one Qwen3-VL patch; merge tiny tails into previous
 
 
+# 全域 OCR Reader 快取變數
+_ocr_reader = None
+
+
+def _get_ocr_reader():
+    """延遲載入 EasyOCR 讀取器，避免在多進程初始化時重複加載權重。"""
+    global _ocr_reader
+    if _ocr_reader is None:
+        try:
+            import easyocr
+            import torch
+            use_gpu = torch.cuda.is_available()
+            # 支援繁體中文與英文
+            _ocr_reader = easyocr.Reader(["ch_tra", "en"], gpu=use_gpu)
+        except Exception as e:
+            import logging
+            logging.getLogger("chunk_tiles").warning(f"無法初始化 EasyOCR: {e}")
+            _ocr_reader = "FAILED"
+    return _ocr_reader
+
+
 def _compute_tile_hashes(article_dir: str, tile_names: list[str]) -> dict[str, str]:
     """Compute MD5 hashes for all tile files."""
     hashes = {}
@@ -153,9 +174,18 @@ def chunk_article(article_dir: str, dry_run: bool = False, force: bool = False) 
         if w <= viewport_width and h <= CHUNK_HEIGHT:
             chunk_name = f"chunk_{tile_idx:04d}_00.png"
             chunk_path = os.path.join(article_dir, chunk_name)
+            chunk_text = ""
             if not dry_run:
                 shutil.copy2(tile_path, chunk_path)
                 files_written += 1
+                # 執行 OCR 辨識
+                reader = _get_ocr_reader()
+                if reader and reader != "FAILED":
+                    try:
+                        results = reader.readtext(chunk_path, detail=0)
+                        chunk_text = " ".join(results)
+                    except Exception as e:
+                        logger.warning(f"OCR 辨識失敗 {chunk_path}: {e}")
             chunks_info.append(
                 {
                     "tile": tile_name,
@@ -166,6 +196,7 @@ def chunk_article(article_dir: str, dry_run: bool = False, force: bool = False) 
                     "y_offset": 0,
                     "height": h,
                     "width": w,
+                    "text": chunk_text,
                 }
             )
             continue
@@ -192,9 +223,18 @@ def chunk_article(article_dir: str, dry_run: bool = False, force: bool = False) 
 
                 chunk_name = f"chunk_{tile_idx:04d}_{chunk_idx:02d}.png"
                 chunk_path = os.path.join(article_dir, chunk_name)
+                chunk_text = ""
                 if not dry_run:
                     img.crop((x, y, x + cw, y + ch)).save(chunk_path, format="PNG")
                     files_written += 1
+                    # 執行 OCR 辨識
+                    reader = _get_ocr_reader()
+                    if reader and reader != "FAILED":
+                        try:
+                            results = reader.readtext(chunk_path, detail=0)
+                            chunk_text = " ".join(results)
+                        except Exception as e:
+                            logger.warning(f"OCR 辨識失敗 {chunk_path}: {e}")
 
                 chunks_info.append(
                     {
@@ -206,6 +246,7 @@ def chunk_article(article_dir: str, dry_run: bool = False, force: bool = False) 
                         "y_offset": y,
                         "height": ch,
                         "width": cw,
+                        "text": chunk_text,
                     }
                 )
                 chunk_idx += 1
