@@ -54,18 +54,18 @@ _ocr_reader = None
 
 
 def _get_ocr_reader():
-    """延遲載入 EasyOCR 讀取器，避免在多進程初始化時重複加載權重。"""
+    """延遲載入 PaddleOCR 讀取器，避免在多進程初始化時重複加載權重。"""
     global _ocr_reader
     if _ocr_reader is None:
         try:
-            import easyocr
+            from paddleocr import PaddleOCR
             import torch
             use_gpu = torch.cuda.is_available()
-            # 支援繁體中文與英文
-            _ocr_reader = easyocr.Reader(["ch_tra", "en"], gpu=use_gpu)
+            # 初始化 PaddleOCR，支援中文與英文，關閉傾斜分類，關閉日誌
+            _ocr_reader = PaddleOCR(use_angle_cls=False, lang="ch", use_gpu=use_gpu, show_log=False)
         except Exception as e:
             import logging
-            logging.getLogger("chunk_tiles").warning(f"無法初始化 EasyOCR: {e}")
+            logging.getLogger("chunk_tiles").warning(f"無法初始化 PaddleOCR: {e}")
             _ocr_reader = "FAILED"
     return _ocr_reader
 
@@ -183,8 +183,12 @@ def chunk_article(article_dir: str, dry_run: bool = False, force: bool = False, 
                 reader = _get_ocr_reader() if ocr else None
                 if reader and reader != "FAILED":
                     try:
-                        results = reader.readtext(chunk_path, detail=0)
-                        chunk_text = " ".join(results)
+                        results = reader.ocr(chunk_path, cls=False)
+                        txts = []
+                        if results and results[0]:
+                            for line in results[0]:
+                                txts.append(line[1][0])
+                        chunk_text = " ".join(txts)
                     except Exception as e:
                         logger.warning(f"OCR 辨識失敗 {chunk_path}: {e}")
             chunks_info.append(
@@ -232,8 +236,12 @@ def chunk_article(article_dir: str, dry_run: bool = False, force: bool = False, 
                     reader = _get_ocr_reader() if ocr else None
                     if reader and reader != "FAILED":
                         try:
-                            results = reader.readtext(chunk_path, detail=0)
-                            chunk_text = " ".join(results)
+                            results = reader.ocr(chunk_path, cls=False)
+                            txts = []
+                            if results and results[0]:
+                                for line in results[0]:
+                                    txts.append(line[1][0])
+                            chunk_text = " ".join(txts)
                         except Exception as e:
                             logger.warning(f"OCR 辨識失敗 {chunk_path}: {e}")
 
