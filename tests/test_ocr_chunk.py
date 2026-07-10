@@ -23,7 +23,7 @@ def test_chunk_article_with_ocr(tmp_path):
     with open(article_dir / "tiles.json", "w") as f:
         json.dump(tiles_json, f)
         
-    res = chunk_article(str(article_dir), dry_run=False, force=True)
+    res = chunk_article(str(article_dir), dry_run=False, force=True, ocr=True)
     assert res is not None
     
     # 檢查 chunks.json 是否包含 text 欄位

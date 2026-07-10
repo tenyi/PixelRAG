@@ -84,13 +84,14 @@ def _compute_tile_hashes(article_dir: str, tile_names: list[str]) -> dict[str, s
     return hashes
 
 
-def chunk_article(article_dir: str, dry_run: bool = False, force: bool = False) -> dict:
+def chunk_article(article_dir: str, dry_run: bool = False, force: bool = False, ocr: bool = False) -> dict:
     """Chunk all tiles in one article directory.
 
     Args:
         article_dir: Path to *.png.tiles/ directory.
         dry_run: If True, compute chunks but don't write files.
         force: If True, rechunk even if chunks.json exists (compare tile hashes).
+        ocr: If True, extract text from chunks using EasyOCR.
 
     Returns:
         dict with chunking results, or None if up-to-date / skipped.
@@ -179,7 +180,7 @@ def chunk_article(article_dir: str, dry_run: bool = False, force: bool = False) 
                 shutil.copy2(tile_path, chunk_path)
                 files_written += 1
                 # 執行 OCR 辨識
-                reader = _get_ocr_reader()
+                reader = _get_ocr_reader() if ocr else None
                 if reader and reader != "FAILED":
                     try:
                         results = reader.readtext(chunk_path, detail=0)
@@ -228,7 +229,7 @@ def chunk_article(article_dir: str, dry_run: bool = False, force: bool = False) 
                     img.crop((x, y, x + cw, y + ch)).save(chunk_path, format="PNG")
                     files_written += 1
                     # 執行 OCR 辨識
-                    reader = _get_ocr_reader()
+                    reader = _get_ocr_reader() if ocr else None
                     if reader and reader != "FAILED":
                         try:
                             results = reader.readtext(chunk_path, detail=0)
@@ -324,6 +325,7 @@ def process_shard(
     dry_run: bool = False,
     force: bool = False,
     delete_tiles: bool = False,
+    ocr: bool = True,
 ) -> dict:
     """Chunk all articles in a shard directory."""
     t0 = time.time()
@@ -351,7 +353,7 @@ def process_shard(
                 continue
             total_articles += 1
 
-            result = chunk_article(str(article_dir), dry_run=dry_run, force=force)
+            result = chunk_article(str(article_dir), dry_run=dry_run, force=force, ocr=ocr)
             if result is None:
                 skipped_articles += 1
                 continue
@@ -404,20 +406,34 @@ def main():
         action="store_true",
         help="Delete tile_*.png after chunking each shard",
     )
+    parser.add_argument(
+        "--ocr",
+        action="store_true",
+        default=True,
+        help="Extract text from chunks using EasyOCR (default: True)",
+    )
+    parser.add_argument(
+        "--no-ocr",
+        action="store_false",
+        dest="ocr",
+        help="Disable EasyOCR text extraction",
+    )
     args = parser.parse_args()
 
     if args.shard_dir:
         logger.info(
-            "Processing single shard: %s (force=%s, delete_tiles=%s)",
+            "Processing single shard: %s (force=%s, delete_tiles=%s, ocr=%s)",
             args.shard_dir,
             args.force,
             args.delete_tiles,
+            args.ocr,
         )
         result = process_shard(
             args.shard_dir,
             dry_run=args.dry_run,
             force=args.force,
             delete_tiles=args.delete_tiles,
+            ocr=args.ocr,
         )
         logger.info("Result: %s", result)
         return
@@ -430,12 +446,13 @@ def main():
         if p.is_dir() and p.name.startswith("shard_")
     )
     logger.info(
-        "Found %d shards in %s (workers=%d, force=%s, delete_tiles=%s, dry_run=%s)",
+        "Found %d shards in %s (workers=%d, force=%s, delete_tiles=%s, ocr=%s, dry_run=%s)",
         len(shard_dirs),
         tiles_dir,
         args.workers,
         args.force,
         args.delete_tiles,
+        args.ocr,
         args.dry_run,
     )
 
@@ -454,7 +471,7 @@ def main():
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         futures = {
             pool.submit(
-                process_shard, sd, args.dry_run, args.force, args.delete_tiles
+                process_shard, sd, args.dry_run, args.force, args.delete_tiles, args.ocr
             ): sd
             for sd in shard_dirs
         }
