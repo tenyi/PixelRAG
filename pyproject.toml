@@ -31,7 +31,8 @@ embed = [
     "faiss-cpu>=1.9.0",
     "numpy>=1.26.0",
     "tqdm>=4.60.0",
-    "easyocr>=1.7.1",
+    "paddleocr>=2.7.3",
+    "paddlepaddle>=2.6.0",
 ]
 serve = [
     "fastapi>=0.115.0",
